@@ -7,9 +7,39 @@ export async function onRequest(context) {
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   };
-
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
+  // --- Helpers ---
+  async function decodeJwtPayload(token) {
+    if (!token) return undefined;
+    const parts = token.split('.');
+    if (parts.length < 2) return undefined;
+    const b64 = s => s.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(s.length / 4) * 4, '=');
+    try {
+      const json = atob(b64(parts[1]));
+      return JSON.parse(json);
+    } catch {
+      return undefined;
+    }
+  }
+
+  async function getDisplayName(userId, secretKey) {
+    if (!userId) return 'user';
+    try {
+      const r = await fetch(`https://api.clerk.com/v1/users/${userId}`, {
+        headers: { 'Authorization': `Bearer ${secretKey}` }
+      });
+      if (!r.ok) return userId;
+      const u = await r.json();
+      const name = [u.first_name, u.last_name].filter(Boolean).join(' ').trim();
+      const username = u.username;
+      const email = Array.isArray(u.email_addresses) && u.email_addresses[0]?.email_address;
+      return (name || username || email || userId);
+    } catch {
+      return userId;
+    }
   }
 
 // --- Helpers ---
@@ -116,9 +146,11 @@ async function verifyWithJWKS(token, expectedIssuer, expectedAzp) {
       // Fallback: Verify using JWKS from the token issuer
       const jwksFallback = await verifyWithJWKS(token, claims.payload?.iss, new URL(request.url).origin).catch(e => ({ ok: false, error: String(e) }));
       if (jwksFallback.ok) {
+        const payload = decodeJwtPayload(token);
+        const displayName = await getDisplayName(payload?.sub, context.env.CLERK_SECRET_KEY);
         return new Response(
           JSON.stringify({
-            message: "Welcome to the protected content! This is only visible to authenticated users.",
+            message: `Welcome, ${displayName}! This is only visible to authenticated users.`,
             verifiedBy: 'jwks'
           }),
           { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...corsHeaders } }
@@ -147,10 +179,13 @@ async function verifyWithJWKS(token, expectedIssuer, expectedAzp) {
       );
     }
 
-    // Token is valid, return the protected message
+    // Token is valid, personalize the message
+    const payload = decodeJwtPayload(token);
+    const displayName = await getDisplayName(payload?.sub, context.env.CLERK_SECRET_KEY);
     return new Response(
       JSON.stringify({
-        message: "Welcome to the protected content! This is only visible to authenticated users."
+        message: `Welcome, ${displayName}! This is only visible to authenticated users.`,
+        verifiedBy: 'bapi'
       }),
       {
         headers: {
