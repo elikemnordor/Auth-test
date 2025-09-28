@@ -26,18 +26,28 @@ export async function onRequest(context) {
   }
 
   async function getDisplayName(userId, secretKey) {
-    if (!userId) return 'user';
+    if (!userId) {
+      console.log('[welcome] getDisplayName called without userId, falling back to "user"');
+      return 'user';
+    }
     try {
       const r = await fetch(`https://api.clerk.com/v1/users/${userId}`, {
         headers: { 'Authorization': `Bearer ${secretKey}` }
       });
-      if (!r.ok) return userId;
+      if (!r.ok) {
+        console.error('[welcome] getDisplayName Clerk users fetch failed', {
+          status: r.status,
+          statusText: r.statusText,
+        });
+        return userId;
+      }
       const u = await r.json();
       const name = [u.first_name, u.last_name].filter(Boolean).join(' ').trim();
       const username = u.username;
       const email = Array.isArray(u.email_addresses) && u.email_addresses[0]?.email_address;
       return (name || username || email || userId);
     } catch {
+      console.error('[welcome] getDisplayName Clerk users fetch threw, returning userId fallback');
       return userId;
     }
   }
@@ -119,7 +129,13 @@ async function verifyWithJWKS(token, expectedIssuer, expectedAzp) {
   try {
     // Verify the token with Clerk's API
     const tokenFromHeader = !!(authHeader && authHeader.startsWith('Bearer '));
+    const tokenSource = tokenFromHeader ? 'authorization_header' : (sessionCookieDecoded ? '__session_cookie' : 'none');
     const token = tokenFromHeader ? authHeader.split(' ')[1] : sessionCookieDecoded;
+    console.log('[welcome] token selection', {
+      tokenSource,
+      hasToken: !!token,
+      tokenLength: token ? token.length : 0,
+    });
     const verifyResponse = await fetch('https://api.clerk.com/v1/sessions/verify', {
       method: 'POST',
       headers: {
@@ -128,24 +144,32 @@ async function verifyWithJWKS(token, expectedIssuer, expectedAzp) {
       },
       body: JSON.stringify({ token })
     });
-    const verifyData = await verifyResponse.clone().json().catch((err) => {
-      console.error('[welcome] Failed to parse verify response JSON', err);
-      return undefined;
+    console.log('[welcome] verifyResponse status', { status: verifyResponse.status });
+    const verifyText = await verifyResponse.clone().text().catch((err) => {
+      console.error('[welcome] Failed to read verify response text', err);
+      return '';
     });
-    if (verifyData) {
-      const { user_id, session } = verifyData;
-      console.log('[welcome] verifyData summary', {
-        user_id,
-        sessionUserId: session?.user_id,
-        sessionId: session?.id,
-        organizationId: session?.organization_id,
-      });
+
+    let verifyData;
+    if (verifyText && verifyText.trim().length > 0) {
+      try {
+        verifyData = JSON.parse(verifyText);
+        const { user_id, session } = verifyData;
+        console.log('[welcome] verifyData summary', {
+          user_id,
+          sessionUserId: session?.user_id,
+          sessionId: session?.id,
+          organizationId: session?.organization_id,
+        });
+      } catch (err) {
+        console.error('[welcome] Failed to parse verify response JSON', err, { raw: verifyText.slice(0, 200) });
+      }
     } else {
-      console.log('[welcome] verifyData missing or non-JSON response');
+      console.log('[welcome] verify response body empty');
     }
 
     if (!verifyResponse.ok) {
-      const detailsText = await verifyResponse.text().catch(() => '');
+      const detailsText = verifyText;
       // Try to decode JWT for debugging claims (non-cryptographic)
       const parts = (token || '').split('.');
       let claims = {};
