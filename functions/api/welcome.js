@@ -127,32 +127,29 @@ async function verifyWithJWKS(token, expectedIssuer, expectedAzp) {
   }
 
   try {
-    const verifyUrlPrimary = 'https://api.clerk.com/v1/client/sessions/verify';
-    const verifyUrlFallback = 'https://api.clerk.com/v1/sessions/verify';
+    // Verify the token with Clerk's API
+    const tokenFromHeader = !!(authHeader && authHeader.startsWith('Bearer '));
+    const tokenSource = tokenFromHeader ? 'authorization_header' : (sessionCookieDecoded ? '__session_cookie' : 'none');
+    const token = tokenFromHeader ? authHeader.split(' ')[1] : sessionCookieDecoded;
+    console.log('[welcome] token selection', {
+      tokenSource,
+      hasToken: !!token,
+      tokenLength: token ? token.length : 0,
+    });
 
-    async function verifyTokenAgainst(url) {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${context.env.CLERK_SECRET_KEY}`,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({ token })
-      });
-      const text = await response.text().catch(() => '');
-      console.log('[welcome] verify attempt', { url, status: response.status, hasBody: !!text });
-      return { response, text };
-    }
-
-    let verifyAttempt = await verifyTokenAgainst(verifyUrlPrimary);
-    if (verifyAttempt.response.status === 404 || verifyAttempt.response.status === 405) {
-      console.log('[welcome] retrying verify with fallback endpoint');
-      verifyAttempt = await verifyTokenAgainst(verifyUrlFallback);
-    }
-
-    const verifyResponse = verifyAttempt.response;
-    const verifyText = verifyAttempt.text;
+    const verifyResponse = await fetch('https://api.clerk.com/v1/sessions/verify', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${context.env.CLERK_SECRET_KEY}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ token })
+    });
+    const verifyText = await verifyResponse.clone().text().catch((err) => {
+      console.error('[welcome] Failed to read verify response text', err);
+      return '';
+    });
 
     let verifyData;
     if (verifyText && verifyText.trim().length > 0) {
