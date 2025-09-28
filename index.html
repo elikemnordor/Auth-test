@@ -47,7 +47,7 @@
       // Fetch protected content from the server AFTER we are authenticated
       try {
         const token = await Clerk.session.getToken();
-        const res = await fetch('/api/secure-content', {
+        const res = await fetch('/api/welcome', {
           headers: { Authorization: `Bearer ${token}` }
         });
         const html = await res.text();
