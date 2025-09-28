@@ -128,7 +128,21 @@ async function verifyWithJWKS(token, expectedIssuer, expectedAzp) {
       },
       body: JSON.stringify({ token })
     });
-    const verifyData = await verifyResponse.clone().json().catch(() => undefined);
+    const verifyData = await verifyResponse.clone().json().catch((err) => {
+      console.error('[welcome] Failed to parse verify response JSON', err);
+      return undefined;
+    });
+    if (verifyData) {
+      const { user_id, session } = verifyData;
+      console.log('[welcome] verifyData summary', {
+        user_id,
+        sessionUserId: session?.user_id,
+        sessionId: session?.id,
+        organizationId: session?.organization_id,
+      });
+    } else {
+      console.log('[welcome] verifyData missing or non-JSON response');
+    }
 
     if (!verifyResponse.ok) {
       const detailsText = await verifyResponse.text().catch(() => '');
@@ -182,8 +196,16 @@ async function verifyWithJWKS(token, expectedIssuer, expectedAzp) {
 
     // Token is valid, personalize the message
     const payload = decodeJwtPayload(token);
+    console.log('[welcome] decoded token payload', {
+      sub: payload?.sub,
+      iss: payload?.iss,
+      azp: payload?.azp,
+      sid: payload?.sid,
+    });
     const userId = verifyData?.user_id || verifyData?.session?.user_id || payload?.sub;
+    console.log('[welcome] resolved userId for display', { userId });
     const displayName = await getDisplayName(userId, context.env.CLERK_SECRET_KEY);
+    console.log('[welcome] resolved displayName', { displayName });
     return new Response(
       JSON.stringify({
         message: `Welcome, ${displayName}! This is only visible to authenticated users.`,
