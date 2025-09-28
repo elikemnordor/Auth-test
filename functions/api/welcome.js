@@ -128,6 +128,7 @@ async function verifyWithJWKS(token, expectedIssuer, expectedAzp) {
       },
       body: JSON.stringify({ token })
     });
+    const verifyData = await verifyResponse.clone().json().catch(() => undefined);
 
     if (!verifyResponse.ok) {
       const detailsText = await verifyResponse.text().catch(() => '');
@@ -181,7 +182,8 @@ async function verifyWithJWKS(token, expectedIssuer, expectedAzp) {
 
     // Token is valid, personalize the message
     const payload = decodeJwtPayload(token);
-    const displayName = await getDisplayName(payload?.sub, context.env.CLERK_SECRET_KEY);
+    const userId = verifyData?.user_id || verifyData?.session?.user_id || payload?.sub;
+    const displayName = await getDisplayName(userId, context.env.CLERK_SECRET_KEY);
     return new Response(
       JSON.stringify({
         message: `Welcome, ${displayName}! This is only visible to authenticated users.`,
