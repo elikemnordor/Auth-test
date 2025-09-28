@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Clerk Prod Login Test</title>
+
+  <!-- Use your PRODUCTION publishable key -->
+  <script
+    async
+    crossorigin="anonymous"
+    data-clerk-publishable-key="pk_live_Y2xlcmsuYXV0aC10ZXN0Lm5vcmRvci5jbyQ"
+    src="https://cdn.jsdelivr.net/npm/@clerk/clerk-js@latest/dist/clerk.browser.js">
+  </script>
+
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 24px; }
+    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; max-width: 680px; }
+    #signed-in, #signed-out { display: none; }
+    pre { background: #f8fafc; padding: 12px; border-radius: 8px; overflow: auto; }
+    .row { display: flex; align-items: center; gap: 12px; }
+  </style>
+</head>
+<body>
+  <div id="signed-out" class="card">
+    <h2>Sign in</h2>
+    <div id="sign-in"></div>
+  </div>
+
+  <div id="signed-in" class="card"></div>
+
+  <script>
+    async function renderSignedInUI() {
+      const signedIn = document.getElementById("signed-in");
+      signedIn.innerHTML = `
+        <div class="row">
+          <div id="user-button"></div>
+          <button id="sign-out-btn">Sign out</button>
+        </div>
+        <div id="protected" style="margin-top:12px;">Loading...</div>
+      `;
+
+      Clerk.mountUserButton(document.getElementById("user-button"), {
+        afterSignOutUrl: window.location.href
+      });
+
+      // Fetch protected content from the server AFTER we are authenticated
+      try {
+        const token = await Clerk.session.getToken();
+        const res = await fetch('/api/secure-content', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const html = await res.text();
+        document.getElementById('protected').innerHTML = res.ok ? html : 'Failed to load content.';
+      } catch (e) {
+        document.getElementById('protected').textContent = 'Failed to load content.';
+      }
+
+      const signOutBtn = document.getElementById("sign-out-btn");
+      signOutBtn.onclick = async () => {
+        const signedIn = document.getElementById("signed-in");
+        const signedOut = document.getElementById("signed-out");
+        // Immediately hide and clear protected content
+        signedIn.style.display = "none";
+        signedIn.innerHTML = "";
+        signedOut.style.display = "block";
+        // Clear console so previous sensitive output isn't visible after logout
+        try { console.clear(); } catch (_) {}
+        await Clerk.signOut();
+        // No reload needed; listener will keep UI in sync
+      };
+    }
+
+    function showSignedOut() {
+      const signedIn = document.getElementById("signed-in");
+      const signedOut = document.getElementById("signed-out");
+      signedIn.style.display = "none";
+      signedIn.innerHTML = ""; // ensure no protected content remains in DOM
+      signedOut.style.display = "block";
+      // Clear console so previous sensitive output isn't visible when signed out
+      try { console.clear(); } catch (_) {}
+      Clerk.mountSignIn(document.getElementById("sign-in"), {
+        fallbackRedirectUrl: window.location.href
+      });
+    }
+
+    async function showSignedIn() {
+      const signedIn = document.getElementById("signed-in");
+      const signedOut = document.getElementById("signed-out");
+      signedOut.style.display = "none";
+      signedIn.style.display = "block";
+      await renderSignedInUI();
+    }
+
+    window.addEventListener("load", async () => {
+      await window.Clerk.load();
+
+      if (Clerk.user) {
+        showSignedIn();
+      } else {
+        showSignedOut();
+      }
+
+      // React to auth state changes to keep DOM clean when logging out
+      Clerk.addListener(({ user }) => {
+        if (user) {
+          showSignedIn();
+        } else {
+          showSignedOut();
+        }
+      });
+    });
+  </script>
+</body>
+</html>
