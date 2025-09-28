@@ -30,9 +30,8 @@ export async function onRequest(context) {
 
   try {
     // Verify the token with Clerk's API
-    const token = (authHeader && authHeader.startsWith('Bearer '))
-      ? authHeader.split(' ')[1]
-      : sessionCookie;
+    const tokenFromHeader = !!(authHeader && authHeader.startsWith('Bearer '));
+    const token = tokenFromHeader ? authHeader.split(' ')[1] : sessionCookie;
     const audience = new URL(request.url).origin;
     const verifyResponse = await fetch('https://api.clerk.com/v1/sessions/verify', {
       method: 'POST',
@@ -45,8 +44,33 @@ export async function onRequest(context) {
 
     if (!verifyResponse.ok) {
       const detailsText = await verifyResponse.text().catch(() => '');
+      // Try to decode JWT for debugging claims (non-cryptographic)
+      const parts = (token || '').split('.');
+      let claims = {};
+      try {
+        if (parts.length >= 2) {
+          const b64 = (s) => s.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(s.length / 4) * 4, '=');
+          const json = atob(b64(parts[1]));
+          const hdr = atob(b64(parts[0]));
+          claims = { header: JSON.parse(hdr), payload: JSON.parse(json) };
+        }
+      } catch (_) {}
       return new Response(
-        JSON.stringify({ error: 'Invalid token', details: detailsText }),
+        JSON.stringify({ 
+          error: 'Invalid token', 
+          details: detailsText, 
+          tokenSource: tokenFromHeader ? 'authorization_header' : (sessionCookie ? '__session_cookie' : 'none'),
+          claims: claims.payload ? {
+            iss: claims.payload.iss,
+            aud: claims.payload.aud,
+            azp: claims.payload.azp,
+            sid: claims.payload.sid,
+            sub: claims.payload.sub,
+            exp: claims.payload.exp,
+            iat: claims.payload.iat,
+            kid: claims.header?.kid,
+          } : undefined
+        }),
         { status: 403, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
       );
     }
