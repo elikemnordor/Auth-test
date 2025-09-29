@@ -1,0 +1,17 @@
+{
+  "name": "test-auth",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler pages dev .",
+    "build": "echo 'static build'",
+    "deploy": "echo 'Deploy via Cloudflare Pages'"
+  },
+  "dependencies": {
+    "@clerk/backend": "^1.0.0"
+  },
+  "devDependencies": {
+    "wrangler": "^3.74.0"
+  }
+}
