@@ -1,4 +1,4 @@
- import { authenticateRequest, createClerkClient } from '@clerk/backend';
+ import { verifyToken, createClerkClient } from '@clerk/backend';
 
  export async function onRequest(context) {
   const { request, env } = context;
@@ -13,31 +13,50 @@
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
-  // Try Clerk Worker SDK first (cookie-only or Authorization header). This avoids manual BAPI calls.
+  // Try Clerk Worker SDK first using verifyToken() against the token in header/cookie.
   try {
-    const auth = await authenticateRequest(request, {
-      secretKey: env.CLERK_SECRET_KEY,
-      publishableKey: env.CLERK_PUBLISHABLE_KEY,
-    });
+    const authHeader = request.headers.get('Authorization');
+    const cookieHeader = request.headers.get('Cookie') || '';
+    const sessionCookie = cookieHeader
+      .split(';')
+      .map(p => p.trim())
+      .find(p => p.startsWith('__session='))
+      ?.split('=')[1];
+    const sessionCookieDecoded = sessionCookie ? decodeURIComponent(sessionCookie) : undefined;
+    const tokenFromHeader = !!(authHeader && authHeader.startsWith('Bearer '));
+    const token = tokenFromHeader ? authHeader.split(' ')[1] : sessionCookieDecoded;
 
-    if (auth?.userId) {
-      const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY });
-      const user = await clerk.users.getUser(auth.userId);
-      const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ').trim()
-        || user.username
-        || user.emailAddresses?.[0]?.emailAddress
-        || user.id;
-      return new Response(
-        JSON.stringify({
-          message: `Welcome, ${displayName}! This is only visible to authenticated users.`,
-          email: user.emailAddresses?.[0]?.emailAddress,
-          verifiedBy: 'sdk',
-        }),
-        { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...corsHeaders } }
-      );
+    if (token) {
+      const payloadGuess = await decodeJwtPayload(token).catch(() => undefined);
+      const issuer = payloadGuess?.iss; // non-cryptographic decode used only to guide verification options
+      const origin = new URL(request.url).origin;
+      const verified = await verifyToken(token, {
+        issuer,
+        authorizedParties: [origin],
+      }).catch(() => undefined);
+
+      const userId = verified?.payload?.sub;
+      if (userId) {
+        const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY });
+        const user = await clerk.users.getUser(userId);
+        const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ').trim()
+          || user.username
+          || user.emailAddresses?.[0]?.emailAddress
+          || user.id;
+        return new Response(
+          JSON.stringify({
+            message: `Welcome, ${displayName}! This is only visible to authenticated users.`,
+            email: user.emailAddresses?.[0]?.emailAddress,
+            verifiedBy: 'sdk-verifyToken',
+          }),
+          { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...corsHeaders } }
+        );
+      } else {
+        console.log('[welcome] SDK verifyToken returned no userId; falling back');
+      }
     }
   } catch (e) {
-    console.log('[welcome] SDK authenticateRequest failed, falling back to manual verification', String(e?.message || e));
+    console.log('[welcome] SDK verifyToken path failed, falling back to manual verification', String(e?.message || e));
   }
 
   // --- Helpers ---
