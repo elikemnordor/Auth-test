@@ -169,7 +169,9 @@ async function verifyWithJWKS(token, expectedIssuer, expectedAzp) {
       console.log('[welcome] verify response body empty');
     }
 
-    if (!verifyResponse.ok) {
+    const bapiHasUser = verifyResponse.ok && !!(verifyData?.user_id || verifyData?.session?.user_id);
+    console.log('[welcome] BAPI user present?', { ok: verifyResponse.ok, bapiHasUser });
+    if (!bapiHasUser) {
       const detailsText = verifyText;
       // Try to decode JWT for debugging claims (non-cryptographic)
       const parts = (token || '').split('.');
