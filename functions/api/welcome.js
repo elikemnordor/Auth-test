@@ -30,9 +30,10 @@
       const payloadGuess = await decodeJwtPayload(token).catch(() => undefined);
       const issuer = payloadGuess?.iss; // non-cryptographic decode used only to guide verification options
       const origin = new URL(request.url).origin;
+      console.log('[welcome] verifyToken attempt', { issuer, origin });
       const verified = await verifyToken(token, {
         issuer,
-        authorizedParties: [origin],
+        clockSkewInMs: 10_000,
       }).catch(() => undefined);
 
       const userId = verified?.payload?.sub;
@@ -236,8 +237,8 @@ async function verifyWithJWKS(token, expectedIssuer, expectedAzp) {
       // Fallback: Verify using JWKS from the token issuer
       const jwksFallback = await verifyWithJWKS(token, claims.payload?.iss, new URL(request.url).origin).catch(e => ({ ok: false, error: String(e) }));
       if (jwksFallback.ok) {
-        const payload = decodeJwtPayload(token);
-        const displayName = await getDisplayName(payload?.sub, context.env.CLERK_SECRET_KEY);
+        const userId = jwksFallback.payload?.sub ?? (await decodeJwtPayload(token))?.sub;
+        const displayName = await getDisplayName(userId, context.env.CLERK_SECRET_KEY);
         return new Response(
           JSON.stringify({
             message: `Welcome, ${displayName}! This is only visible to authenticated users.`,
