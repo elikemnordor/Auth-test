@@ -9,7 +9,7 @@
     "deploy": "echo 'Deploy via Cloudflare Pages'"
   },
   "dependencies": {
-    "@clerk/backend": "^1.0.0"
+    "@clerk/backend": "^2.16.0"
   },
   "devDependencies": {
     "wrangler": "^3.74.0"
