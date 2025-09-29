@@ -1,5 +1,7 @@
-export async function onRequest(context) {
-  const { request } = context;
+ import { authenticateRequest, createClerkClient } from '@clerk/backend';
+
+ export async function onRequest(context) {
+  const { request, env } = context;
 
   // Basic CORS headers (tune origin in production if needed)
   const corsHeaders = {
@@ -9,6 +11,33 @@ export async function onRequest(context) {
   };
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
+  // Try Clerk Worker SDK first (cookie-only or Authorization header). This avoids manual BAPI calls.
+  try {
+    const auth = await authenticateRequest(request, {
+      secretKey: env.CLERK_SECRET_KEY,
+      publishableKey: env.CLERK_PUBLISHABLE_KEY,
+    });
+
+    if (auth?.userId) {
+      const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY });
+      const user = await clerk.users.getUser(auth.userId);
+      const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ').trim()
+        || user.username
+        || user.emailAddresses?.[0]?.emailAddress
+        || user.id;
+      return new Response(
+        JSON.stringify({
+          message: `Welcome, ${displayName}! This is only visible to authenticated users.`,
+          email: user.emailAddresses?.[0]?.emailAddress,
+          verifiedBy: 'sdk',
+        }),
+        { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...corsHeaders } }
+      );
+    }
+  } catch (e) {
+    console.log('[welcome] SDK authenticateRequest failed, falling back to manual verification', String(e?.message || e));
   }
 
   // --- Helpers ---
